@@ -35,17 +35,13 @@ app.post('/api/kakao/chat', async (req, res) => {
   try {
     const userUtterance = req.body.userRequest?.utterance || '안녕하세요';
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-
-    const chat = model.startChat({
-      history: [
-        { role: 'user', parts: [{ text: SYSTEM_INSTRUCTION }] },
-        { role: 'model', parts: [{ text: "반갑습니다 고객님! 인스포트(insport) 프리미엄 AI 어시스턴트입니다. 무엇을 도와드릴까요?" }] }
-      ]
+    // 광속 답변을 위해 gemini-1.5-flash-8b 모델로 대폭 업그레이드
+    const model = genAI.getGenerativeModel({ 
+      model: 'gemini-1.5-flash-8b',
+      systemInstruction: SYSTEM_INSTRUCTION
     });
 
-    const result = await chat.sendMessage(userUtterance);
+    const result = await model.generateContent(userUtterance);
     const aiResponseText = result.response.text();
 
     console.log(`[USER]: ${userUtterance}`);
@@ -80,6 +76,26 @@ app.post('/api/kakao/chat', async (req, res) => {
       }
     });
   }
+});
+
+// 상용화 대비 중앙 로그 데이터베이스 (간이 인메모리)
+let appLogs = [];
+
+// [ADMIN] 로그 데이터 수집 API
+app.post('/api/admin/log', (req, res) => {
+    const logData = {
+        id: Date.now(),
+        ...req.body,
+        time: new Date().toLocaleTimeString()
+    };
+    appLogs.unshift(logData);
+    if (appLogs.length > 100) appLogs.pop(); // 100개까지만 유지
+    res.json({ success: true, log: logData });
+});
+
+// [ADMIN] 로그 데이터 전체 조회 API
+app.get('/api/admin/logs', (req, res) => {
+    res.json(appLogs);
 });
 
 const PORT = process.env.PORT || 3000;

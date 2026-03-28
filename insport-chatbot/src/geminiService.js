@@ -61,7 +61,7 @@ export const analyzeImageWithGemini = async (apiKey, imageBase64) => {
   if (!apiKey) throw new Error("API Key is missing for Vision task.");
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-8b" });
 
   const prompt = `
     당신은 안티그래비티 쇼핑몰(insport)의 CS 담당자입니다.
