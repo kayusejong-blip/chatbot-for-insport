@@ -2,7 +2,10 @@
 
 | 버전 | 날짜 | 업데이트 요약 | 작업자 |
 | :--- | :--- | :--- | :--- |
-| **v1.5** | 2026-03-28 | **상용화 기반 구축** - Gemini 1.5 Flash-8B 광속 모델 교체 및 백엔드 데이터 동기화 API 구축 | Antigravity |
+| **v1.8** | 2026-03-28 | **자체 챗봇 독립화** - 기존 카카오톡 Webhook 연동 로직 삭제 및 `insport-backend`로 프로젝트 명칭 변경 | Antigravity |
+| **v1.7** | 2026-03-28 | **실시간 상담 협업** - Socket.io 도입, 관리자 대화 가로채기(Human Takeover) 및 라이브 채팅 기능 구축 | Antigravity |
+| **v1.6** | 2026-03-28 | **데이터 시각화 도입** - 어드민 대시보드 내 실시간 판독 통계 차트(Chart.js) 및 긴급 알림 패널 구축 | Antigravity |
+| **v1.5** | 2026-03-28 | **보안 및 상용화** - API 키 보안 프록시(Proxy) 도입, 모델 1.5-Flash-8B 교체, 지식 학습 UI 구축 | Antigravity |
 | **v1.4** | 2026-03-28 | **배포 대중화** - GitHub Pages 전용 빌드/배포 환경(gh-pages) 및 모바일 UI 전면 도입 | Antigravity |
 | **v1.2** | 2026-03-28 | **테스트 런처 도입** - 원클릭 실행 배치 파일(`v1.2_QuickStart.bat`) 생성 및 포트 9000 고정 | Antigravity |
 | **v1.1** | 2026-03-27 | **Gemini AI 정식 통합** - Claude에서 Gemini로 엔진 전환 및 실제 API 연동 환경 구축 | Antigravity |

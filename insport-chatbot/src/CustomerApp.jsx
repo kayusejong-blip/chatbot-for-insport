@@ -1,31 +1,69 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { MessageCircle, Send, Image, Settings, Home, Clock, Smile, Cpu } from 'lucide-react';
-import { analyzeMessageWithGemini, analyzeImageWithGemini } from './geminiService';
+import { io } from 'socket.io-client';
+import { analyzeImageWithGemini } from './geminiService';
+
+// 소켓 서버 주소
+const socket = io('http://localhost:3000');
+
+// 사용자 고유 ID 생성 (익명 방문자 구분용)
+const getClientId = () => {
+  let id = localStorage.getItem('insport_client_id');
+  if (!id) {
+    id = 'user_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem('insport_client_id', id);
+  }
+  return id;
+};
 
 const CustomerApp = () => {
+  const clientId = getClientId();
   const [activeTab, setActiveTab] = useState('home');
-  const [apiKey, setApiKey] = useState(import.meta.env.VITE_GEMINI_API_KEY || "");
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      sender: 'bot',
-      text: "반갑습니다! 인스포트(insport) AI 어시스턴트입니다.\n무엇을 도와드릴까요?",
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      menu: true
-    }
-  ]);
+  const [messages, setMessages] = useState([]);
+  const [isManualMode, setIsManualMode] = useState(false);
   const [inputText, setInputText] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   
   const scrollRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Body 스타일 분리 (고객앱 전용)
   useEffect(() => {
     document.body.className = 'customer-body';
-    return () => { document.body.className = ''; };
-  }, []);
+    
+    // 소켓 이벤트 등록
+    socket.emit('join', { clientId, role: 'client' });
+
+    socket.on('chatHistory', (history) => {
+        if (history.length > 0) setMessages(history);
+        else {
+            setMessages([{
+                id: 1, sender: 'bot', text: "반갑습니다! 인스포트(insport) AI 어시스턴트입니다.\n무엇을 도와드릴까요?",
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                menu: true
+            }]);
+        }
+    });
+
+    socket.on('newMessage', (msg) => {
+        setMessages(prev => [...prev, msg]);
+        setIsAnalyzing(false);
+    });
+
+    socket.on('streamMessage', ({ id, text }) => {
+        setMessages(prev => prev.map(m => m.id === id ? { ...m, text } : m));
+    });
+
+    socket.on('modeStatus', ({ isManual }) => {
+        setIsManualMode(isManual);
+    });
+
+    return () => { 
+        document.body.className = ''; 
+        socket.off('newMessage');
+        socket.off('chatHistory');
+        socket.off('modeStatus');
+    };
+  }, [clientId]);
 
   useEffect(() => {
     if (activeTab === 'chat' && scrollRef.current) {
@@ -33,65 +71,24 @@ const CustomerApp = () => {
     }
   }, [messages, activeTab, isAnalyzing]);
 
-  const addMessage = (sender, text, extra = {}) => {
-    setMessages(prev => [...prev, {
-      id: prev.length + 1,
-      sender,
-      text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      ...extra
-    }]);
-  };
-
-  const handleMenuClick = async (menuItem) => {
-    addMessage('user', menuItem);
-    
-    if (menuItem === '사진으로 문의') {
-      addMessage('bot', "상담을 위해 사진을 업로드해 주세요 (최대 3장).\n📸 Gemini AI가 사진을 분석하여 불량 판독 또는 사이즈를 추천해 드립니다.");
-      setTimeout(() => fileInputRef.current?.click(), 800);
-      return;
-    }
-
-    if (!apiKey) {
-        addMessage('bot', "현재 시뮬레이션 모드입니다. 정상적인 답변을 위해 어드민 패널에서 API 키를 설정해 주세요.");
-      return;
-    }
-
-    setIsAnalyzing(true);
-    try {
-      const response = await analyzeMessageWithGemini(apiKey, menuItem);
-      setIsAnalyzing(false);
-      addMessage('bot', response);
-    } catch (error) {
-      setIsAnalyzing(false);
-      addMessage('bot', "오류가 발생했습니다: " + error.message);
-    }
-  };
-
-  const handleSend = async () => {
+  const handleSend = () => {
     if (!inputText.trim()) return;
-    const userText = inputText;
-    addMessage('user', userText);
+    const text = inputText;
     setInputText("");
     
-    if (!apiKey) {
-      setIsAnalyzing(true);
-      setTimeout(() => {
-        setIsAnalyzing(false);
-        addMessage('bot', `현재 시뮬레이션 모드입니다. '${userText}'에 대해 확인했습니다. API 키를 설정해 주세요!`);
-      }, 1000);
-      return;
-    }
+    // 소켓을 통해 메시지 전송 (서버에서 AI 답변 여부 결정)
+    socket.emit('sendMessage', { clientId, sender: 'user', text });
+    if (!isManualMode) setIsAnalyzing(true);
+  };
 
-    setIsAnalyzing(true);
-    try {
-      const response = await analyzeMessageWithGemini(apiKey, userText);
-      setIsAnalyzing(false);
-      addMessage('bot', response);
-    } catch (error) {
-      setIsAnalyzing(false);
-      addMessage('bot', "응답을 처리할 수 없습니다: " + error.message);
+  const handleMenuClick = (menuItem) => {
+    if (menuItem === '사진으로 문의') {
+        setMessages(prev => [...prev, { id: Date.now(), sender: 'bot', text: "상담을 위해 사진을 업로드해 주세요.\n📸 Gemini AI가 실시간 분석해 드립니다." }]);
+        setTimeout(() => fileInputRef.current?.click(), 800);
+        return;
     }
+    socket.emit('sendMessage', { clientId, sender: 'user', text: menuItem });
+    if (!isManualMode) setIsAnalyzing(true);
   };
 
   const handleImageUpload = async (e) => {
@@ -101,27 +98,15 @@ const CustomerApp = () => {
     const reader = new FileReader();
     reader.onload = async () => {
       const base64 = reader.result.split(',')[1];
-      addMessage('user', "📷 [이미지 전송됨]");
+      socket.emit('sendMessage', { clientId, sender: 'user', text: "📷 [이미지 전송됨]" });
       
-      if (!apiKey) {
-        setIsAnalyzing(true);
-        setTimeout(() => {
-          setIsAnalyzing(false);
-          addMessage('bot', "제미나이 시뮬레이션: '사진에서 로고를 발견했습니다.'\n(실제 Vision 분석을 위해서는 API 키가 필요합니다)");
-        }, 1500);
-        return;
-      }
-
       setIsAnalyzing(true);
       try {
-        const result = await analyzeImageWithGemini(apiKey, base64);
+        const result = await analyzeImageWithGemini(null, base64);
         setIsAnalyzing(false);
-        addMessage('bot', result.auto_reply, {
-          visionData: result,
-          visionUi: true
-        });
+        socket.emit('sendMessage', { clientId, sender: 'bot', text: result.auto_reply });
         
-        // [Sync] 실제 백엔드 서버(3000번)로 판독 데이터를 실시간 전송 (상용화 로직)
+        // [Sync] 백엔드 시스템 로그 전송
         try {
             await fetch('http://localhost:3000/api/admin/log', {
                 method: 'POST',
@@ -130,20 +115,14 @@ const CustomerApp = () => {
                     type: result.type || '분석 완료',
                     summary: result.summary,
                     severity: result.severity,
-                    client: '모바일-고객앱V1.5'
+                    client: clientId
                 })
             });
-        } catch (e) {
-            console.warn("백엔드 동기화 실패 (서버가 꺼져있을 수 있습니다)");
-            // 폴백: 로컬 스토리지에 유지
-            const alerts = JSON.parse(localStorage.getItem('insport_alerts') || '[]');
-            alerts.push({ id: Date.now(), type: result.type, summary: result.summary, severity: result.severity, time: new Date().toLocaleTimeString() });
-            localStorage.setItem('insport_alerts', JSON.stringify(alerts));
-        }
+        } catch (e) { console.warn("로그 동기화 실패"); }
 
       } catch (error) {
         setIsAnalyzing(false);
-        addMessage('bot', "이미지 분석 실패: " + error.message);
+        socket.emit('sendMessage', { clientId, sender: 'bot', text: "이미지 분석 실패: " + error.message });
       }
     };
     reader.readAsDataURL(file);
@@ -205,7 +184,68 @@ const CustomerApp = () => {
                 
                 <div className="bubble-wrap" style={{ alignItems: m.sender === 'user' ? 'flex-end' : 'flex-start' }}>
                   <div className={`chat-bubble ${m.sender === 'user' ? 'user-bubble' : 'bot-bubble'}`}>
-                    {m.text}
+                    
+                    {/* 동적 버튼 렌더링 적용 (AI가 [BUTTON: 메뉴1 | 메뉴2] 형식으로 주면 버튼으로 치환됨) */}
+                    {(() => {
+                        let textToRender = m.text || '';
+                        const btnRegex = /\[BUTTON:(.*?)]/g;
+                        const buttons = [];
+                        const urls = [];
+                        
+                        let cleanText = textToRender.replace(btnRegex, (match, p1) => {
+                            p1.split('|').forEach(opt => buttons.push(opt.trim()));
+                            return "";
+                        });
+
+                        const urlRegex = /(https?:\/\/[^\s\])]+)/g;
+                        cleanText = cleanText.replace(urlRegex, (match) => {
+                            urls.push(match);
+                            return "";
+                        }).replace(/\[\]|\(\)/g, "").trim();
+
+                        return (
+                            <>
+                                <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{cleanText}</div>
+                                
+                                {urls.length > 0 && m.sender === 'bot' && (
+                                    <div className="dynamic-link-menu" style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        {urls.map((url, idx) => (
+                                            <button 
+                                                key={`url-${idx}`} 
+                                                onClick={() => window.open(url, '_blank')}
+                                                style={{
+                                                    background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '12px', padding: '10px 14px', fontSize: '0.9rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontWeight: 'bold'
+                                                }}
+                                            >
+                                                🔗 상세 링크 확인하기
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {buttons.length > 0 && m.sender === 'bot' && (
+                                    <div className="chat-quick-menu" style={{ marginTop: '12px' }}>
+                                        {buttons.filter(b=>b).map((btn, idx) => (
+                                            <button 
+                                                key={idx} 
+                                                onClick={() => handleMenuClick(btn)}
+                                                className="quick-btn"
+                                            >
+                                                {btn}
+                                            </button>
+                                        ))}
+                                        <button 
+                                            onClick={() => handleMenuClick("초기 메뉴로 돌아가기")}
+                                            className="quick-btn"
+                                            style={{ border: '1px solid #475569', color: '#94a3b8' }}
+                                        >
+                                            🏠 처음으로
+                                        </button>
+                                    </div>
+                                )}
+                            </>
+                        );
+                    })()}
                     
                     {/* Vision 결과 UI */}
                     {m.visionUi && (
